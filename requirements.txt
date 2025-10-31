@@ -1,0 +1,13 @@
+fastapi>=0.120.0
+uvicorn>=0.38.0
+neo4j>=5.0.0
+pydantic>=2.0.0
+passlib[bcrypt]>=1.7.4
+requests>=2.32.0
+python-dotenv>=1.0.0
+
+# AI/ML Dependencies
+openai>=1.0.0
+tiktoken>=0.5.0
+langchain>=0.1.0
+langchain-openai>=0.0.2
