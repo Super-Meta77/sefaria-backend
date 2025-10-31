@@ -14,11 +14,11 @@ app = FastAPI(
     version="1.0",
     description="Comprehensive API for advanced Sefaria features including graph analysis, AI commentary, and more"
 )
-
-# CORS middleware for frontend integration
+#
+# CORS middleware for frontend integration - open to all origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],  # Add your frontend URLs
+    allow_origins=["*"],  # Allow all origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
