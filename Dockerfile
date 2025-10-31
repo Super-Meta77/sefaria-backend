@@ -22,7 +22,7 @@ RUN /opt/venv/bin/pip install --no-cache-dir --upgrade -r /app/requirements.txt
 COPY ./ /app/
 
 # Expose port 80
-EXPOSE 80
+EXPOSE 5000
 
 # Command to run your FastAPI application with Uvicorn using the virtual environment
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5000"]
