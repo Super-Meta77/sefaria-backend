@@ -1,6 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional
+from .sugya_manager import get_sugya_manager
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from ai.sugya_extractor import get_sugya_extractor
 
 router = APIRouter()
 
@@ -65,20 +70,38 @@ SUGYA_DATA = {
     }
 }
 
+@router.get("/sugya/list/available")
+def list_available_sugyot():
+    """
+    Get list of all available sugya references from the Neo4j database.
+    Returns array of sugya references with titles.
+    """
+    try:
+        manager = get_sugya_manager()
+        sugyot = manager.list_all_sugyot()
+        return {"sugyot": sugyot, "total": len(sugyot)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 @router.get("/sugya/{ref}", response_model=SugyaStructure)
 def get_sugya_structure(ref: str):
     """
-    Get the dialectic structure of a Talmudic sugya.
+    Get the dialectic structure of a Talmudic sugya from the Neo4j database.
     Returns a tree of questions, answers, challenges, and resolutions.
     """
-    # Normalize ref (remove spaces, make consistent)
-    normalized_ref = ref.replace(" ", "_")
-    
-    if normalized_ref in SUGYA_DATA:
-        return SUGYA_DATA[normalized_ref]
-    
-    # Return generic structure if not found
-    raise HTTPException(status_code=404, detail=f"Sugya structure not found for {ref}")
+    try:
+        manager = get_sugya_manager()
+        structure = manager.get_sugya_structure(ref)
+        
+        if structure:
+            return structure
+        
+        # Return generic structure if not found
+        raise HTTPException(status_code=404, detail=f"Sugya not found for {ref}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.get("/sugya/{ref}/flow", response_model=List[dict])
 def get_sugya_flow(ref: str):
@@ -102,4 +125,149 @@ def get_sugya_flow(ref: str):
 
 # Enable forward references for recursive model
 SugyaNode.model_rebuild()
+
+# ============================================================================
+# AI-Powered Extraction Endpoints
+# ============================================================================
+
+@router.post("/sugya/extract/{tractate}")
+def extract_sugyot_from_tractate(
+    tractate: str,
+    background_tasks: BackgroundTasks,
+    start_page: str = "2a",
+    limit: int = 50
+):
+    """
+    Trigger AI-powered extraction of sugyot from a Talmudic tractate.
+    
+    This endpoint uses GPT-4 to:
+    - Analyze Talmudic texts
+    - Identify sugya boundaries
+    - Extract dialectic structure
+    - Save results to database
+    
+    Args:
+        tractate: Name of tractate (e.g., "Berakhot")
+        start_page: Starting page (e.g., "2a")
+        limit: Maximum number of texts to analyze
+    
+    Returns:
+        Job status and initial information
+    """
+    try:
+        extractor = get_sugya_extractor()
+        
+        # Run extraction in background
+        background_tasks.add_task(
+            extractor.extract_and_save_all,
+            tractate=tractate,
+            start_page=start_page,
+            limit=limit
+        )
+        
+        return {
+            "status": "started",
+            "message": f"AI extraction started for {tractate} from {start_page}",
+            "tractate": tractate,
+            "start_page": start_page,
+            "limit": limit,
+            "note": "This process may take several minutes. Check logs for progress."
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Extraction error: {str(e)}")
+
+@router.post("/sugya/extract-sync/{tractate}")
+def extract_sugyot_sync(
+    tractate: str,
+    start_page: str = "2a",
+    limit: int = 20
+):
+    """
+    Synchronous version of sugya extraction (waits for completion).
+    Use for smaller extractions.
+    
+    Returns:
+        Extraction statistics
+    """
+    try:
+        extractor = get_sugya_extractor()
+        stats = extractor.extract_and_save_all(
+            tractate=tractate,
+            start_page=start_page,
+            limit=limit
+        )
+        
+        return {
+            "status": "completed",
+            "stats": stats,
+            "message": f"Extracted {stats['saved']} sugyot from {tractate}"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Extraction error: {str(e)}")
+
+@router.post("/sugya/extract-all")
+def extract_all_sugyot(
+    background_tasks: BackgroundTasks,
+    limit_per_tractate: int = 100
+):
+    """
+    Trigger AI-powered extraction from ALL tractates in the database.
+    
+    This endpoint automatically:
+    - Discovers all Talmudic tractates in Neo4j
+    - Extracts sugyot from each tractate
+    - Saves all results to database
+    
+    Args:
+        limit_per_tractate: Maximum texts to analyze per tractate
+    
+    Returns:
+        Job status
+    """
+    try:
+        extractor = get_sugya_extractor()
+        
+        # Run in background
+        background_tasks.add_task(
+            extractor.extract_all_sugyot,
+            limit_per_tractate=limit_per_tractate
+        )
+        
+        return {
+            "status": "started",
+            "message": "AI extraction started for ALL tractates",
+            "limit_per_tractate": limit_per_tractate,
+            "note": "This process may take several minutes to hours. Check logs for progress."
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Extraction error: {str(e)}")
+
+@router.post("/sugya/extract-all-sync")
+def extract_all_sugyot_sync(limit_per_tractate: int = 50):
+    """
+    Synchronous version of extract-all (waits for completion).
+    Use for smaller limits.
+    
+    WARNING: This may take a long time!
+    
+    Returns:
+        Extraction statistics for all tractates
+    """
+    try:
+        extractor = get_sugya_extractor()
+        stats = extractor.extract_all_sugyot(
+            limit_per_tractate=limit_per_tractate
+        )
+        
+        return {
+            "status": "completed",
+            "stats": stats,
+            "message": f"Extracted from {stats['tractates_processed']} tractates, saved {stats['total_saved']} sugyot"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Extraction error: {str(e)}")
 
